@@ -1,0 +1,107 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <MPU6050.h>
+
+MPU6050 mpu;
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+int buttonPin = 15;  // Pin for the reset button
+float pitch = 0, roll = 0;
+float pitchTarget = 0, rollTarget = 0;
+float smoothFactor = 0.3;  // Increase the factor for faster response
+
+// Vertices of a larger cube in 3D space (scaled)
+float cubeVertices[8][3] = {
+  {-20, -20, -20}, {20, -20, -20}, {20, 20, -20}, {-20, 20, -20},
+  {-20, -20,  20}, {20, -20,  20}, {20, 20,  20}, {-20, 20,  20}
+};
+
+// Function to project 3D points to 2D
+void project3D(float x, float y, float z, int &x2d, int &y2d) {
+  float scaleFactor = 64 / (z + 100);  // Simple perspective projection
+  x2d = (int)(x * scaleFactor + 64);   // Centered on 64, 32
+  y2d = (int)(y * scaleFactor + 32);
+}
+
+// Function to draw the wireframe cube
+void drawCube(float angleX, float angleY) {
+  int projectedVertices[8][2];
+  
+  // Rotation matrices
+  float cosX = cos(angleX), sinX = sin(angleX);
+  float cosY = cos(angleY), sinY = sin(angleY);
+
+  for (int i = 0; i < 8; i++) {
+    // Rotate around X axis (pitch)
+    float y = cubeVertices[i][1] * cosX - cubeVertices[i][2] * sinX;
+    float z = cubeVertices[i][1] * sinX + cubeVertices[i][2] * cosX;
+
+    // Rotate around Y axis (roll)
+    float x = cubeVertices[i][0] * cosY + z * sinY;
+    z = -cubeVertices[i][0] * sinY + z * cosY;
+
+    // Project to 2D
+    project3D(x, y, z, projectedVertices[i][0], projectedVertices[i][1]);
+  }
+
+  // Draw the cube by connecting vertices
+  display.drawLine(projectedVertices[0][0], projectedVertices[0][1], projectedVertices[1][0], projectedVertices[1][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[1][0], projectedVertices[1][1], projectedVertices[2][0], projectedVertices[2][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[2][0], projectedVertices[2][1], projectedVertices[3][0], projectedVertices[3][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[3][0], projectedVertices[3][1], projectedVertices[0][0], projectedVertices[0][1], SSD1306_WHITE);
+
+  display.drawLine(projectedVertices[4][0], projectedVertices[4][1], projectedVertices[5][0], projectedVertices[5][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[5][0], projectedVertices[5][1], projectedVertices[6][0], projectedVertices[6][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[6][0], projectedVertices[6][1], projectedVertices[7][0], projectedVertices[7][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[7][0], projectedVertices[7][1], projectedVertices[4][0], projectedVertices[4][1], SSD1306_WHITE);
+
+  display.drawLine(projectedVertices[0][0], projectedVertices[0][1], projectedVertices[4][0], projectedVertices[4][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[1][0], projectedVertices[1][1], projectedVertices[5][0], projectedVertices[5][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[2][0], projectedVertices[2][1], projectedVertices[6][0], projectedVertices[6][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[3][0], projectedVertices[3][1], projectedVertices[7][0], projectedVertices[7][1], SSD1306_WHITE);
+
+  // Draw an "X" on the front face (connecting vertices 0, 1, 2, 3)
+  display.drawLine(projectedVertices[0][0], projectedVertices[0][1], projectedVertices[2][0], projectedVertices[2][1], SSD1306_WHITE);
+  display.drawLine(projectedVertices[1][0], projectedVertices[1][1], projectedVertices[3][0], projectedVertices[3][1], SSD1306_WHITE);
+}
+
+void setup() {
+  Wire.begin();
+  mpu.initialize();
+  
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+
+  pinMode(buttonPin, INPUT_PULLUP);
+  display.clearDisplay();
+}
+
+void loop() {
+  // Read MPU6050 data
+  int16_t ax, ay, az;
+  mpu.getAcceleration(&ax, &ay, &az);
+  
+  // Map acceleration to tilt angles (simplified)
+  pitchTarget = atan2(ax, az) * 180 / PI;
+  rollTarget = atan2(ay, az) * 180 / PI;
+  
+  // Smoothly interpolate towards target angles
+  pitch += (pitchTarget - pitch) * smoothFactor;
+  roll += (rollTarget - roll) * smoothFactor;
+
+  // Check button press to reset cube rotation
+  if (digitalRead(buttonPin) == LOW) {
+    pitch = 0;
+    roll = 0;
+  }
+
+  // Clear display and draw the rolling cube with an "X" on the front face
+  display.clearDisplay();
+  drawCube(pitch * PI / 180.0, roll * PI / 180.0);  // Convert degrees to radians
+  display.display();
+
+  delay(20);  // Reduce delay for faster animation speed
+}
